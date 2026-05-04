@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+pip-wheel-metadata/
+*.whl
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+*.env.*
+
+# Data & secrets
+projects/
+_archive/
+_logs/
+*.db
+*.jsonl
+*.parquet
+*.xlsx
+*.csv
+!tests/fixtures/*.xlsx
+!tests/fixtures/*.csv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Development instruction/report files
+4[0-9]-*.md
+claude-*.md
+ui_preview.html

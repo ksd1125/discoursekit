@@ -11,6 +11,10 @@ from discoursekit.core.db import get_connection, insert_article, insert_ingest_r
 from discoursekit.ingest.base import BaseAdapter, IngestParams
 
 
+class IngestRunError(RuntimeError):
+    """Raised after an ingest run is recorded as failed."""
+
+
 def run_ingest(adapter: BaseAdapter, params: IngestParams, db_path: Path) -> str:
     """Execute an ingest run and write articles into the project DB."""
     run_id = str(uuid.uuid4())
@@ -58,5 +62,8 @@ def run_ingest(adapter: BaseAdapter, params: IngestParams, db_path: Path) -> str
                 },
             )
         conn.close()
+
+    if status == "failed":
+        raise IngestRunError(error_msg or "Ingest run failed")
 
     return run_id

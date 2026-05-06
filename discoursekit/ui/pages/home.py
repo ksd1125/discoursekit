@@ -1,242 +1,444 @@
-"""Home page — onboarding, project creation, and project dashboard."""
+"""Home page focused on researcher-friendly analysis setup."""
+
+from __future__ import annotations
+
+import json
+import shutil
+from datetime import date, timedelta
 
 import streamlit as st
-from discoursekit.ui.components import page_header, metric_row, empty_state, pipeline_progress
+
+from discoursekit.ui.components import metric_row, page_header
 
 
-def render():
-    project_id = st.session_state.get("current_project_id")
+ANALYSIS_OPTIONS = {
+    "time_series": "보도량 추이",
+    "publisher_dist": "언론사/출처 분포",
+    "keyword_frequency": "키워드 빈도",
+    "keyword_trends": "시기별 키워드 변화",
+    "before_after": "사건 전후 비교",
+    "qual_sample": "정성 분석 표본 추천",
+}
 
-    if not project_id:
-        _render_onboarding()
-    else:
-        _render_dashboard(project_id)
+ANALYSIS_HELP = {
+    "time_series": "월별 기사 건수 추이를 꺾은선 차트로 확인합니다.",
+    "publisher_dist": "어떤 언론사나 출처가 많이 보도했는지 분포를 봅니다.",
+    "keyword_frequency": "기사 제목과 요약문에서 자주 등장하는 키워드를 추출합니다.",
+    "keyword_trends": "특정 시점 전후로 키워드 순위가 어떻게 바뀌었는지 비교합니다.",
+    "before_after": "사건일 또는 기준일 전후의 보도량과 키워드 차이를 비교합니다.",
+    "qual_sample": "정성 분석을 위해 직접 읽고 코딩할 기사 표본을 추천합니다.",
+}
+
+SOURCE_LABELS = {
+    "naver_news": "NAVER News",
+    "bigkinds": "BIGKinds 파일",
+    "csv": "CSV 업로드",
+}
 
 
-# ─────────────────────────────────────────────
-# Onboarding (no project selected)
-# ─────────────────────────────────────────────
-
-def _render_onboarding():
-    page_header("DiscourseKit", "뉴스·블로그·공공데이터 기반 담론 분석 워크벤치")
-
-    st.markdown("")
-
-    # ─── Primary actions ───
-    col_new, col_open, col_import = st.columns(3)
-
-    with col_new:
-        st.markdown("""
-        <div class="status-card" style="text-align:center;min-height:160px;">
-            <div style="font-size:2.5rem;margin-bottom:0.5rem;">🆕</div>
-            <h4 style="text-transform:none;font-size:1rem;">새 프로젝트 시작</h4>
-            <p style="font-size:0.85rem;color:#6c757d;">연구 주제를 정하고 분석을 시작합니다</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col_open:
-        st.markdown("""
-        <div class="status-card" style="text-align:center;min-height:160px;">
-            <div style="font-size:2.5rem;margin-bottom:0.5rem;">📂</div>
-            <h4 style="text-transform:none;font-size:1rem;">기존 프로젝트 열기</h4>
-            <p style="font-size:0.85rem;color:#6c757d;">사이드바에서 프로젝트를 선택하세요</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col_import:
-        st.markdown("""
-        <div class="status-card" style="text-align:center;min-height:160px;">
-            <div style="font-size:2.5rem;margin-bottom:0.5rem;">📦</div>
-            <h4 style="text-transform:none;font-size:1rem;">Handoff 가져오기</h4>
-            <p style="font-size:0.85rem;color:#6c757d;">다른 PC에서 받은 zip을 import</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown("---")
-
-    # ─── Project creation form ───
-    st.markdown("### 새 프로젝트 만들기")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        new_name = st.text_input("프로젝트 이름 *", placeholder="예: 이태원 담론 분석 2022")
-    with col2:
-        new_keywords = st.text_input("키워드 (선택)", placeholder="예: 이태원, 참사, 안전")
-
-    new_desc = st.text_area(
-        "연구 목적 / 설명 (선택)",
-        placeholder="분석 범위, 연구 질문 등을 자유롭게 기술하세요.",
-        height=80,
+def render() -> None:
+    page_header(
+        "무엇을 분석하고 싶나요?",
+        "분석 주제, 검색어, 기간, 자료원을 먼저 정하면 수집부터 기본 분석까지 이어집니다.",
     )
+    _render_analysis_starter()
+    st.markdown("---")
+    _render_existing_projects()
 
-    if st.button("프로젝트 생성", type="primary", key="btn_create_home"):
-        if not new_name.strip():
-            st.error("프로젝트 이름을 입력하세요.")
+
+def _render_analysis_starter() -> None:
+    default_to = date.today()
+    default_from = default_to - timedelta(days=365)
+
+    projects = _list_projects()
+    if not projects:
+        st.markdown(
+            """
+### 처음 오셨나요?
+
+DiscourseKit은 뉴스와 블로그성 자료를 수집하고, 정제하고, 분석 가능한 데이터로 만드는 연구용 워크벤치입니다.
+
+**시작 방법**
+1. 분석 주제와 검색어를 입력합니다.
+2. 기간과 자료원을 선택합니다.
+3. **수집 및 분석 시작**을 누르면 데이터 만들기 화면으로 이동합니다.
+
+**준비물**
+- NAVER News 자동 수집: [NAVER Developers](https://developers.naver.com)에서 검색 API Client ID/Secret 발급
+- BIGKinds 전문 자료: [BIGKinds](https://www.bigkinds.or.kr)에서 검색 결과 XLSX 다운로드
+"""
+        )
+
+    with st.form("analysis_starter_form"):
+        research_topic = st.text_input(
+            "분석 주제",
+            placeholder="예: 이태원동 사건 이후 지역 담론 변화",
+        )
+        query = st.text_input(
+            "검색 키워드 *",
+            placeholder="예: 이태원동",
+        )
+
+        col1, col2 = st.columns(2)
+        with col1:
+            date_from = st.date_input("기간 시작", value=default_from)
+        with col2:
+            date_to = st.date_input("기간 종료", value=default_to)
+
+        st.markdown("#### 자료원")
+        selected_source_labels = st.multiselect(
+            "자료원 선택 *",
+            list(SOURCE_LABELS.values()),
+            default=["NAVER News"],
+            label_visibility="collapsed",
+        )
+        selected_sources = [
+            key for key, label in SOURCE_LABELS.items() if label in selected_source_labels
+        ]
+
+        _render_source_guidance(selected_source_labels)
+
+        st.markdown("#### 보고 싶은 기본 분석")
+        cols = st.columns(2)
+        selected_analyses: list[str] = []
+        for i, (key, label) in enumerate(ANALYSIS_OPTIONS.items()):
+            with cols[i % 2]:
+                default_checked = key in {
+                    "time_series",
+                    "publisher_dist",
+                    "keyword_frequency",
+                    "keyword_trends",
+                }
+                if st.checkbox(
+                    label,
+                    value=default_checked,
+                    key=f"analysis_{key}",
+                    help=ANALYSIS_HELP.get(key, ""),
+                ):
+                    selected_analyses.append(key)
+
+        cutoff_date = None
+        if "before_after" in selected_analyses:
+            cutoff_date = st.date_input(
+                "비교 기준일",
+                value=date_from,
+                help="사건 발생일 또는 분석자가 전후를 나누고 싶은 기준일입니다.",
+            )
+
+        col_submit, col_advice = st.columns(2)
+        with col_submit:
+            submitted = st.form_submit_button("수집 및 분석 시작", type="primary")
+        with col_advice:
+            advice_requested = st.form_submit_button("LLM 검색안 생성")
+
+    if advice_requested:
+        if not query.strip() and not research_topic.strip():
+            st.error("검색안을 만들려면 분석 주제나 검색 키워드를 입력하세요.")
         else:
-            _create_project(new_name.strip(), new_desc.strip())
+            from discoursekit.llm.search_advisor import generate_search_advice
 
-    # ─── Handoff import ───
-    st.markdown("---")
-    st.markdown("### Handoff Import")
-    st.caption("수집 PC에서 생성한 ingest-only handoff zip을 가져옵니다.")
-    uploaded_zip = st.file_uploader("Handoff zip 파일", type=["zip"], key="home_import_zip")
-    import_name = st.text_input("Import 프로젝트 이름 (비워두면 원래 이름 유지)", key="home_import_name")
-    if uploaded_zip and st.button("Import 실행", key="btn_home_import"):
-        from discoursekit.ui.pages.settings import _run_handoff_import
+            api_key = _get_interactive_api_key()
+            advice = generate_search_advice(research_topic.strip(), query.strip(), api_key=api_key)
+            st.session_state["search_advice"] = advice
+            st.session_state.setdefault("search_advice_history", []).append(advice)
+            st.session_state["search_advice_round"] = len(st.session_state["search_advice_history"])
 
-        _run_handoff_import(uploaded_zip, import_name)
+    _render_search_advice_panel()
 
-    # ─── Workflow overview ───
-    st.markdown("---")
-    st.markdown("### 분석 워크플로우")
-    st.markdown("""
-    | 단계 | 설명 |
-    |:---:|------|
-    | **1. 수집** | BIGKinds XLSX, CSV 파일에서 기사를 수집합니다 |
-    | **2. 정제** | 중복 제거, 단문 필터, 본문 정규화를 수행합니다 |
-    | **3. LLM 분류** | Gemini API로 기사를 자동 분류합니다 (resume 지원) |
-    | **4. 분석** | 기술통계, 시계열, 일치율 분석 및 보고서를 생성합니다 |
+    with st.expander("다른 자료원 안내", expanded=False):
+        st.markdown(
+            """
+| 자료원 | 설명 | 링크 |
+|--------|------|------|
+| **BIGKinds** | 국내 종합 뉴스 DB. 기사 전문 XLSX 다운로드 가능 | [bigkinds.or.kr](https://www.bigkinds.or.kr) |
+| **공공데이터포털** | 정부/공공기관 데이터와 보도자료성 자료 | [data.go.kr](https://www.data.go.kr) |
+| **한국언론진흥재단** | 미디어 관련 조사와 통계 | [kpf.or.kr](https://www.kpf.or.kr) |
+| **학술 DB** | RISS, KCI, DBpia 등 논문 검색 | [riss.kr](https://www.riss.kr) |
 
-    > 향후 NAVER News API, 공공데이터포털 등 추가 수집원을 지원할 예정입니다.
-    """)
+CSV로 정리하면 어떤 자료도 DiscourseKit으로 가져올 수 있습니다.
+"""
+        )
 
+    if not submitted:
+        return
 
-# ─────────────────────────────────────────────
-# Project Dashboard (project selected)
-# ─────────────────────────────────────────────
+    if not query.strip():
+        st.error("검색 키워드를 입력하세요.")
+        return
+    if not selected_sources:
+        st.error("자료원을 1개 이상 선택하세요.")
+        return
+    if date_from > date_to:
+        st.error("기간 시작일은 종료일보다 늦을 수 없습니다.")
+        return
 
-def _render_dashboard(project_id: str):
-    project_name = st.session_state.get("current_project_name", "")
-    page_header(f"{project_name}", "프로젝트 대시보드")
-
-    # Pipeline progress
-    step = _get_current_step(project_id)
-    pipeline_progress(step)
-
-    st.markdown("---")
-
-    # Metrics
-    stats = _load_project_stats(project_id)
-    metric_row([
-        ("전체 기사", stats.get("total", 0), ""),
-        ("Active 기사", stats.get("active", 0), ""),
-        ("LLM 분류", stats.get("classified", 0), ""),
-        ("산출물", stats.get("artifacts", 0), ""),
-    ])
-
-    # ─── Next step CTA ───
-    st.markdown("---")
-    st.markdown("#### 다음 작업")
-    _render_next_step_cta(step)
-
-    # Recent activity
-    st.markdown("---")
-    st.markdown("#### 최근 활동")
-    activities = _load_recent_activity(project_id)
-    if activities:
-        for act in activities[:5]:
-            st.markdown(f"- `{act['time']}` {act['action']}")
-    else:
-        st.caption("아직 활동 기록이 없습니다.")
-
-
-def _render_next_step_cta(step: int):
-    """Show a contextual call-to-action based on current pipeline stage."""
-    cta_map = {
-        0: ("아직 수집된 기사가 없습니다.", "📥 수집 페이지로 이동하여 데이터를 업로드하세요."),
-        1: ("수집이 완료되었습니다.", "🧹 정제 페이지에서 중복 제거와 필터링을 실행하세요."),
-        2: ("정제가 완료되었습니다.", "🤖 LLM 분류 페이지에서 API 설정 후 분류를 시작하세요."),
-        3: ("LLM 분류가 완료되었습니다.", "📊 분석·리포트 페이지에서 결과를 확인하세요."),
-        4: ("모든 단계가 완료되었습니다.", "📦 내보내기를 하거나 추가 분석을 수행할 수 있습니다."),
+    project = _create_project(research_topic.strip() or query.strip(), research_topic.strip())
+    st.session_state["current_project_id"] = project.project_id
+    st.session_state["current_project_name"] = project.name
+    st.session_state["analysis_config"] = {
+        "project_id": project.project_id,
+        "research_topic": research_topic.strip(),
+        "query": query.strip(),
+        "date_from": str(date_from),
+        "date_to": str(date_to),
+        "sources": selected_sources,
+        "analyses": selected_analyses,
+        "cutoff_date": str(cutoff_date) if cutoff_date else None,
     }
-    title, desc = cta_map.get(step, cta_map[0])
-    st.info(f"**{title}** {desc}")
+    st.session_state["nav_page"] = "데이터 만들기"
+    st.rerun()
 
 
-# ─────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────
+def _render_source_guidance(selected_source_labels: list[str]) -> None:
+    if "NAVER News" in selected_source_labels:
+        st.info(
+            "**NAVER News API**는 기사 제목과 요약문만 제공합니다.\n\n"
+            "보도량 추이, 출처 분포, 키워드 빈도에는 적합합니다. "
+            "기사 전문을 직접 읽는 정성 분석에는 BIGKinds 또는 CSV 전문 자료를 함께 쓰는 편이 좋습니다."
+        )
+    if "BIGKinds 파일" in selected_source_labels:
+        st.info(
+            "**BIGKinds**는 기사 전문이 포함된 XLSX 파일을 업로드하는 방식입니다.\n\n"
+            "1. [bigkinds.or.kr](https://www.bigkinds.or.kr)에 접속\n"
+            "2. 검색어와 기간을 설정해 검색\n"
+            "3. 검색 결과에서 기사 분석 또는 원문 다운로드 메뉴 선택\n"
+            "4. 다음 화면에서 내려받은 XLSX 파일 업로드"
+        )
+    if "CSV 업로드" in selected_source_labels:
+        st.info(
+            "**CSV 업로드**는 직접 준비한 데이터 파일을 사용합니다.\n\n"
+            "필수 열: `date`, `title`, `body`\n\n"
+            "선택 열: `publisher`, `keywords`, `url`\n\n"
+            "인코딩은 UTF-8을 권장합니다."
+        )
+
+
+def _render_existing_projects() -> None:
+    st.markdown("#### 기존 프로젝트")
+    projects = _list_projects()
+    if not projects:
+        st.caption("아직 저장된 프로젝트가 없습니다. 위에서 검색어를 입력하고 분석을 시작하세요.")
+        return
+
+    for project in projects[:8]:
+        stats = _load_project_stats(project["project_id"])
+        meta = _load_project_meta(project["project_id"])
+
+        with st.container():
+            col_title, col_action = st.columns([3, 1])
+            with col_title:
+                st.markdown(f"**{project['name']}**")
+                meta_parts = []
+                if meta.get("created_at"):
+                    meta_parts.append(f"생성: {meta['created_at'][:10]}")
+                if meta.get("query"):
+                    meta_parts.append(f"검색어: {meta['query']}")
+                if meta.get("date_range"):
+                    meta_parts.append(meta["date_range"])
+                st.caption(" / ".join(meta_parts) if meta_parts else "수집 조건을 아직 확인할 수 없습니다.")
+            with col_action:
+                if st.button("선택", key=f"select_{project['project_id']}"):
+                    st.session_state["current_project_id"] = project["project_id"]
+                    st.session_state["current_project_name"] = project["name"]
+
+            total = stats.get("total", 0)
+            active = stats.get("active", 0)
+            if total == 0:
+                st.warning("아직 기사를 수집하지 않았습니다.")
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("수집 시작하기", key=f"collect_{project['project_id']}"):
+                        st.session_state["current_project_id"] = project["project_id"]
+                        st.session_state["current_project_name"] = project["name"]
+                        st.session_state["nav_page"] = "데이터 만들기"
+                        st.rerun()
+                with col2:
+                    if st.button("빈 프로젝트 삭제", key=f"delete_{project['project_id']}"):
+                        _delete_project(project["project_id"])
+                        st.rerun()
+            else:
+                metric_row(
+                    [
+                        ("전체 기사", total, ""),
+                        ("분석 가능", active, ""),
+                        ("출처", stats.get("publishers", 0), ""),
+                    ]
+                )
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("분석 대시보드 열기", key=f"analyze_{project['project_id']}"):
+                        st.session_state["current_project_id"] = project["project_id"]
+                        st.session_state["current_project_name"] = project["name"]
+                        st.session_state["nav_page"] = "분석 대시보드"
+                        st.rerun()
+                with col2:
+                    if st.button("정성 분석 열기", key=f"qual_{project['project_id']}"):
+                        st.session_state["current_project_id"] = project["project_id"]
+                        st.session_state["current_project_name"] = project["name"]
+                        st.session_state["nav_page"] = "정성 분석"
+                        st.rerun()
+            st.markdown("---")
+
 
 def _create_project(name: str, description: str):
+    from discoursekit.core.project import Project
+
+    return Project.create(name=name, description=description)
+
+
+def _list_projects() -> list[dict]:
     try:
         from discoursekit.core.project import Project
-        proj = Project.create(name=name, description=description)
-        st.success(f"프로젝트 '{name}' 생성 완료! (ID: {proj.project_id[:8]}...)")
-        st.session_state["current_project_id"] = proj.project_id
-        st.session_state["current_project_name"] = name
-        st.rerun()
-    except Exception as e:
-        st.error(f"생성 실패: {e}")
 
-
-def _get_current_step(project_id: str) -> int:
-    """Determine which pipeline step the project is at."""
-    try:
-        from discoursekit.config import get_projects_dir
-        from discoursekit.core.db import get_connection
-        db_path = get_projects_dir() / project_id / "project.db"
-        if not db_path.exists():
-            return 0
-        conn = get_connection(db_path)
-
-        articles = conn.execute("SELECT COUNT(*) AS n FROM articles WHERE project_id=?", (project_id,)).fetchone()["n"]
-        if articles == 0:
-            conn.close()
-            return 0
-
-        cleans = conn.execute("SELECT COUNT(*) AS n FROM clean_runs WHERE project_id=? AND status='success'", (project_id,)).fetchone()["n"]
-        if cleans == 0:
-            conn.close()
-            return 1
-
-        jobs = conn.execute("SELECT COUNT(*) AS n FROM llm_jobs WHERE project_id=? AND status='success'", (project_id,)).fetchone()["n"]
-        if jobs == 0:
-            conn.close()
-            return 2
-
-        artifacts = conn.execute("SELECT COUNT(*) AS n FROM artifacts WHERE project_id=?", (project_id,)).fetchone()["n"]
-        conn.close()
-        return 4 if artifacts > 0 else 3
+        return [
+            {
+                "project_id": p.project_id,
+                "name": p.name,
+                "created_at": p.created_at,
+                "description": p.description,
+            }
+            for p in Project.list_all()
+        ]
     except Exception:
-        return 0
+        return []
 
 
 def _load_project_stats(project_id: str) -> dict:
     try:
         from discoursekit.config import get_projects_dir
         from discoursekit.core.db import get_connection
+
+        db_path = get_projects_dir() / project_id / "project.db"
+        if not db_path.exists():
+            return {"total": 0, "active": 0, "artifacts": 0, "publishers": 0}
+        conn = get_connection(db_path)
+        total = conn.execute(
+            "SELECT COUNT(*) AS n FROM articles WHERE project_id=?",
+            (project_id,),
+        ).fetchone()["n"]
+        active = conn.execute(
+            "SELECT COUNT(*) AS n FROM articles WHERE project_id=? AND is_active=1",
+            (project_id,),
+        ).fetchone()["n"]
+        artifacts = conn.execute(
+            "SELECT COUNT(*) AS n FROM artifacts WHERE project_id=?",
+            (project_id,),
+        ).fetchone()["n"]
+        publishers = conn.execute(
+            "SELECT COUNT(DISTINCT publisher) AS n FROM articles WHERE project_id=? AND is_active=1",
+            (project_id,),
+        ).fetchone()["n"]
+        conn.close()
+        return {"total": total, "active": active, "artifacts": artifacts, "publishers": publishers}
+    except Exception:
+        return {"total": 0, "active": 0, "artifacts": 0, "publishers": 0}
+
+
+def _load_project_meta(project_id: str) -> dict:
+    try:
+        from discoursekit.config import get_projects_dir
+        from discoursekit.core.db import get_connection
+
         db_path = get_projects_dir() / project_id / "project.db"
         if not db_path.exists():
             return {}
         conn = get_connection(db_path)
-        total = conn.execute("SELECT COUNT(*) AS n FROM articles WHERE project_id=?", (project_id,)).fetchone()["n"]
-        active = conn.execute("SELECT COUNT(*) AS n FROM articles WHERE project_id=? AND is_active=1", (project_id,)).fetchone()["n"]
-        classified = conn.execute("SELECT COUNT(*) AS n FROM llm_results r JOIN articles a ON r.article_id=a.article_id WHERE a.project_id=?", (project_id,)).fetchone()["n"]
-        artifacts = conn.execute("SELECT COUNT(*) AS n FROM artifacts WHERE project_id=?", (project_id,)).fetchone()["n"]
+        row = conn.execute(
+            "SELECT created_at, description FROM projects WHERE project_id = ?",
+            (project_id,),
+        ).fetchone()
+        dates = conn.execute(
+            "SELECT MIN(date) AS d_min, MAX(date) AS d_max FROM articles WHERE project_id = ?",
+            (project_id,),
+        ).fetchone()
+        params_row = conn.execute(
+            "SELECT params_json FROM ingest_runs WHERE project_id = ? ORDER BY started_at DESC LIMIT 1",
+            (project_id,),
+        ).fetchone()
         conn.close()
-        return {"total": total, "active": active, "classified": classified, "artifacts": artifacts}
+
+        meta = {}
+        if row:
+            meta["created_at"] = row["created_at"] or ""
+        if dates and dates["d_min"]:
+            meta["date_range"] = f"{dates['d_min']} ~ {dates['d_max']}"
+        if params_row and params_row["params_json"]:
+            params = json.loads(params_row["params_json"])
+            meta["query"] = params.get("query", "")
+        return meta
     except Exception:
-        return {"total": 0, "active": 0, "classified": 0, "artifacts": 0}
+        return {}
 
 
-def _load_recent_activity(project_id: str) -> list[dict]:
+def _delete_project(project_id: str) -> None:
     try:
         from discoursekit.config import get_projects_dir
-        from discoursekit.core.db import get_connection
-        db_path = get_projects_dir() / project_id / "project.db"
-        if not db_path.exists():
-            return []
-        conn = get_connection(db_path)
-        rows = conn.execute(
-            "SELECT started_at AS time, 'ingest: ' || source AS action FROM ingest_runs WHERE project_id=? "
-            "UNION ALL "
-            "SELECT started_at AS time, 'clean: ' || status AS action FROM clean_runs WHERE project_id=? "
-            "UNION ALL "
-            "SELECT started_at AS time, 'llm: ' || provider || ' ' || status AS action FROM llm_jobs WHERE project_id=? "
-            "ORDER BY time DESC LIMIT 5",
-            (project_id, project_id, project_id),
-        ).fetchall()
-        conn.close()
-        return [{"time": r["time"][:16], "action": r["action"]} for r in rows]
+
+        project_dir = get_projects_dir() / project_id
+        if project_dir.exists():
+            shutil.rmtree(project_dir)
+        if st.session_state.get("current_project_id") == project_id:
+            st.session_state["current_project_id"] = None
+            st.session_state["current_project_name"] = ""
+        st.success("빈 프로젝트를 삭제했습니다.")
+    except Exception as exc:
+        st.error(f"삭제 실패: {exc}")
+
+
+def _render_search_advice_panel() -> None:
+    advice = st.session_state.get("search_advice")
+    if not advice:
+        return
+    with st.expander("LLM 제안: 검색안", expanded=True):
+        st.caption("검색안은 제안입니다. 연구자가 선택하고 수정한 뒤 수집에 사용하세요.")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**핵심 검색어**")
+            for item in advice.core_queries:
+                st.markdown(f"- {item}")
+            st.markdown("**확장 검색어**")
+            for item in advice.expansion_queries:
+                st.markdown(f"- {item}")
+        with col2:
+            st.markdown("**제외 추천 패턴**")
+            for item in advice.exclude_patterns:
+                st.markdown(f"- {item}")
+            st.markdown("**기간/방법 제안**")
+            st.write(advice.time_suggestion)
+            st.write(advice.method_suggestion)
+        st.info(advice.reasoning)
+
+        feedback = st.text_input("수정 의견", key="search_advice_feedback")
+        if st.button("수정 반영 요청"):
+            from discoursekit.llm.search_advisor import revise_search_advice
+
+            round_no = int(st.session_state.get("search_advice_round", 1)) + 1
+            api_key = _get_interactive_api_key()
+            revision = revise_search_advice(advice, feedback, revision_round=round_no, api_key=api_key)
+            st.session_state["search_advice"] = revision.advice
+            st.session_state["search_advice_round"] = revision.revision_round
+            st.session_state.setdefault("search_advice_history", []).append(revision.advice)
+            st.success(revision.revision_note)
+
+
+def _get_interactive_api_key() -> str | None:
+    """Return an API key from the interactive slot, or None."""
+    try:
+        from discoursekit.ui.env_keys import load_gemini_keys
+
+        keys = load_gemini_keys()
+        if not keys:
+            return None
+        from discoursekit.llm.slot_manager import GeminiProjectSlot, GeminiSlotManager
+
+        manager = GeminiSlotManager()
+        for idx, key in enumerate(sorted(keys.keys()), 1):
+            manager.add_slot(GeminiProjectSlot(
+                slot_name=f"slot_{idx}",
+                api_key=keys[key],
+                role="interactive" if idx == len(keys) else "general",
+            ))
+        slot = manager.get_next_available(role="interactive")
+        return slot.api_key if slot else None
     except Exception:
-        return []
+        return None

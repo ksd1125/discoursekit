@@ -51,3 +51,12 @@ def test_manager_all_exhausted():
     slot.record_request()
     assert manager.all_exhausted()
     assert manager.get_next_available() is None
+
+
+def test_manager_role_preference():
+    manager = GeminiSlotManager()
+    manager.add_slot(GeminiProjectSlot(slot_name="batch", api_key="kb", role="batch"))
+    manager.add_slot(GeminiProjectSlot(slot_name="interactive", api_key="ki", role="interactive"))
+
+    assert manager.get_next_available(role="interactive").slot_name == "interactive"
+    assert manager.get_next_available(role="batch").slot_name == "batch"

@@ -17,6 +17,8 @@ EXPECTED_TABLE_NAMES: tuple[str, ...] = (
     "llm_jobs",
     "llm_results",
     "artifacts",
+    "place_reviews",
+    "monthly_place_menu_observations",
 )
 
 
@@ -60,6 +62,8 @@ CREATE TABLE IF NOT EXISTS articles (
     raw_json TEXT,
     cleaned_at TEXT,
     is_active INTEGER DEFAULT 1,
+    collection_method TEXT DEFAULT 'official_api',
+    source_limit TEXT DEFAULT 'excerpt_only',
     FOREIGN KEY (project_id) REFERENCES projects(project_id),
     FOREIGN KEY (ingest_run_id) REFERENCES ingest_runs(run_id)
 );
@@ -133,6 +137,10 @@ CREATE TABLE IF NOT EXISTS llm_results (
     rationale TEXT,
     raw_response_json TEXT,
     called_at TEXT NOT NULL,
+    evidence_valid INTEGER DEFAULT NULL,
+    human_review_status TEXT DEFAULT 'pending',
+    human_override TEXT DEFAULT NULL,
+    reviewed_at TEXT DEFAULT NULL,
     FOREIGN KEY (job_id) REFERENCES llm_jobs(job_id),
     FOREIGN KEY (article_id) REFERENCES articles(article_id),
     UNIQUE(job_id, article_id)
@@ -151,7 +159,124 @@ CREATE TABLE IF NOT EXISTS artifacts (
     metadata_json TEXT,
     FOREIGN KEY (project_id) REFERENCES projects(project_id)
 );
+
+CREATE TABLE IF NOT EXISTS place_reviews (
+    review_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    place_id TEXT NOT NULL,
+    place_name TEXT NOT NULL,
+    review_month TEXT,
+    body TEXT,
+    voted_keywords TEXT,
+    menu_item TEXT,
+    origin_type TEXT,
+    raw_json TEXT,
+    collected_at TEXT NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES projects(project_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_place_reviews_project_place
+    ON place_reviews(project_id, place_id);
+CREATE INDEX IF NOT EXISTS idx_place_reviews_month
+    ON place_reviews(project_id, review_month);
+
+CREATE TABLE IF NOT EXISTS monthly_place_menu_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    region_id TEXT,
+    place_id TEXT NOT NULL,
+    place_name TEXT NOT NULL,
+    review_month TEXT NOT NULL,
+    normalized_menu_name TEXT NOT NULL,
+    raw_menu_examples TEXT,
+    review_count INTEGER DEFAULT 0,
+    first_seen_flag INTEGER DEFAULT 0,
+    continued_flag INTEGER DEFAULT 0,
+    FOREIGN KEY (project_id) REFERENCES projects(project_id),
+    UNIQUE(project_id, place_id, review_month, normalized_menu_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_observations_project_menu
+    ON monthly_place_menu_observations(project_id, normalized_menu_name);
 """
+
+
+_PLACE_REVIEWS_DDL = """
+CREATE TABLE IF NOT EXISTS place_reviews (
+    review_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    place_id TEXT NOT NULL,
+    place_name TEXT NOT NULL,
+    review_month TEXT,
+    body TEXT,
+    voted_keywords TEXT,
+    menu_item TEXT,
+    origin_type TEXT,
+    raw_json TEXT,
+    collected_at TEXT NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES projects(project_id)
+);
+CREATE INDEX IF NOT EXISTS idx_place_reviews_project_place
+    ON place_reviews(project_id, place_id);
+CREATE INDEX IF NOT EXISTS idx_place_reviews_month
+    ON place_reviews(project_id, review_month);
+"""
+
+_OBSERVATIONS_DDL = """
+CREATE TABLE IF NOT EXISTS monthly_place_menu_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    region_id TEXT,
+    place_id TEXT NOT NULL,
+    place_name TEXT NOT NULL,
+    review_month TEXT NOT NULL,
+    normalized_menu_name TEXT NOT NULL,
+    raw_menu_examples TEXT,
+    review_count INTEGER DEFAULT 0,
+    first_seen_flag INTEGER DEFAULT 0,
+    continued_flag INTEGER DEFAULT 0,
+    FOREIGN KEY (project_id) REFERENCES projects(project_id),
+    UNIQUE(project_id, place_id, review_month, normalized_menu_name)
+);
+CREATE INDEX IF NOT EXISTS idx_observations_project_menu
+    ON monthly_place_menu_observations(project_id, normalized_menu_name);
+"""
+
+
+def migrate_schema(conn: sqlite3.Connection) -> list[str]:
+    """Add columns and tables introduced after the initial schema. Returns applied migrations."""
+    applied: list[str] = []
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(articles)").fetchall()
+    }
+    if "collection_method" not in columns:
+        conn.execute(
+            "ALTER TABLE articles ADD COLUMN collection_method TEXT DEFAULT 'official_api'"
+        )
+        applied.append("articles.collection_method")
+    if "source_limit" not in columns:
+        conn.execute(
+            "ALTER TABLE articles ADD COLUMN source_limit TEXT DEFAULT 'excerpt_only'"
+        )
+        applied.append("articles.source_limit")
+
+    tables = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    if "place_reviews" not in tables:
+        conn.executescript(_PLACE_REVIEWS_DDL)
+        applied.append("table.place_reviews")
+    if "monthly_place_menu_observations" not in tables:
+        conn.executescript(_OBSERVATIONS_DDL)
+        applied.append("table.monthly_place_menu_observations")
+
+    if applied:
+        conn.commit()
+    return applied
 
 
 def get_connection(db_path: Path) -> sqlite3.Connection:
@@ -168,6 +293,7 @@ def init_db(db_path: Path) -> sqlite3.Connection:
     conn = get_connection(db_path)
     conn.executescript(SCHEMA_SQL)
     conn.commit()
+    migrate_schema(conn)
     return conn
 
 
@@ -298,3 +424,56 @@ def count_articles(conn: sqlite3.Connection, project_id: str, active_only: bool 
             (project_id,),
         ).fetchone()
     return int(row["n"])
+
+
+def insert_place_review(conn: sqlite3.Connection, row: Mapping[str, Any]) -> None:
+    """Insert a place review, ignoring duplicates."""
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO place_reviews (
+            review_id, project_id, place_id, place_name,
+            review_month, body, voted_keywords, menu_item,
+            origin_type, raw_json, collected_at
+        )
+        VALUES (
+            :review_id, :project_id, :place_id, :place_name,
+            :review_month, :body, :voted_keywords, :menu_item,
+            :origin_type, :raw_json, :collected_at
+        )
+        """,
+        dict(row),
+    )
+
+
+def count_place_reviews(conn: sqlite3.Connection, project_id: str) -> int:
+    """Count place reviews for a project."""
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM place_reviews WHERE project_id = ?",
+        (project_id,),
+    ).fetchone()
+    return int(row["n"])
+
+
+def upsert_observation(conn: sqlite3.Connection, row: Mapping[str, Any]) -> None:
+    """Insert or update a monthly place menu observation."""
+    conn.execute(
+        """
+        INSERT INTO monthly_place_menu_observations (
+            project_id, region_id, place_id, place_name,
+            review_month, normalized_menu_name, raw_menu_examples,
+            review_count, first_seen_flag, continued_flag
+        )
+        VALUES (
+            :project_id, :region_id, :place_id, :place_name,
+            :review_month, :normalized_menu_name, :raw_menu_examples,
+            :review_count, :first_seen_flag, :continued_flag
+        )
+        ON CONFLICT(project_id, place_id, review_month, normalized_menu_name)
+        DO UPDATE SET
+            raw_menu_examples = excluded.raw_menu_examples,
+            review_count = excluded.review_count,
+            first_seen_flag = excluded.first_seen_flag,
+            continued_flag = excluded.continued_flag
+        """,
+        dict(row),
+    )

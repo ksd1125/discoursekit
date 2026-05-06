@@ -10,7 +10,6 @@ from discoursekit.handoff.export_ingest import export_ingest_handoff
 from discoursekit.ingest.base import IngestParams
 from discoursekit.ingest.bigkinds import BigKindsAdapter
 from discoursekit.ingest.naver_blog import NaverBlogAdapter
-from discoursekit.ingest.naver_news import NaverNewsAdapter
 from discoursekit.ingest.runner import run_ingest
 
 
@@ -80,12 +79,11 @@ def test_handoff_db_has_articles(sample_bigkinds_xlsx, tmp_path):
     assert count == 5
 
 
-def test_naver_skeletons_raise_not_implemented():
-    params = IngestParams(project_id="p1", source="naver_news", query="이태원")
-    for adapter in (NaverNewsAdapter(), NaverBlogAdapter()):
-        try:
-            list(adapter.ingest(params))
-        except NotImplementedError as exc:
-            assert "v0.2" in str(exc)
-        else:
-            raise AssertionError("NAVER skeleton should raise NotImplementedError")
+def test_naver_blog_adapter_requires_api_keys():
+    params = IngestParams(project_id="p1", source="naver_blog", query="이태원")
+    try:
+        list(NaverBlogAdapter().ingest(params))
+    except ValueError as exc:
+        assert "client_id" in str(exc) or "client_secret" in str(exc)
+    else:
+        raise AssertionError("NaverBlogAdapter should raise ValueError without API keys")

@@ -12,6 +12,7 @@ from discoursekit.core.db import (
     count_articles,
     init_db,
     insert_article,
+    migrate_schema,
     upsert_project,
     verify_schema,
 )
@@ -215,3 +216,65 @@ def test_project_create(tmp_path):
     missing = verify_schema(conn)
     conn.close()
     assert missing == []
+
+
+def test_new_db_has_collection_method_and_source_limit(tmp_path):
+    """New DB has collection_method and source_limit columns."""
+    db_path = tmp_path / "new.db"
+    conn = init_db(db_path)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(articles)").fetchall()}
+    conn.close()
+    assert "collection_method" in columns
+    assert "source_limit" in columns
+
+
+def test_migrate_adds_columns_to_old_db(tmp_path):
+    """migrate_schema adds missing columns to a pre-existing DB."""
+    import sqlite3
+
+    db_path = tmp_path / "old.db"
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    # Create articles table WITHOUT the new columns (old schema).
+    conn.execute("""
+        CREATE TABLE articles (
+            article_id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            ingest_run_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            date TEXT NOT NULL,
+            publisher TEXT,
+            title TEXT NOT NULL,
+            body_internal TEXT,
+            body_excerpt TEXT,
+            keywords TEXT,
+            url TEXT,
+            raw_json TEXT,
+            cleaned_at TEXT,
+            is_active INTEGER DEFAULT 1
+        )
+    """)
+    conn.commit()
+
+    columns_before = {row[1] for row in conn.execute("PRAGMA table_info(articles)").fetchall()}
+    assert "collection_method" not in columns_before
+
+    applied = migrate_schema(conn)
+    assert "articles.collection_method" in applied
+    assert "articles.source_limit" in applied
+
+    columns_after = {row[1] for row in conn.execute("PRAGMA table_info(articles)").fetchall()}
+    assert "collection_method" in columns_after
+    assert "source_limit" in columns_after
+    conn.close()
+
+
+def test_migrate_is_idempotent(tmp_path):
+    """Running migrate_schema twice doesn't fail."""
+    db_path = tmp_path / "test.db"
+    conn = init_db(db_path)
+    applied_1 = migrate_schema(conn)
+    applied_2 = migrate_schema(conn)
+    conn.close()
+    assert applied_1 == []  # init_db already migrated
+    assert applied_2 == []

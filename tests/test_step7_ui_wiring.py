@@ -9,7 +9,12 @@ from discoursekit.core.db import init_db, upsert_project
 from discoursekit.ingest.base import IngestParams
 from discoursekit.ingest.bigkinds import BigKindsAdapter
 from discoursekit.ingest.runner import run_ingest
-from discoursekit.ui.env_keys import load_gemini_keys, save_gemini_keys
+from discoursekit.ui.env_keys import (
+    load_gemini_keys,
+    load_naver_keys,
+    save_gemini_keys,
+    save_naver_keys,
+)
 
 
 def test_env_keys_roundtrip_preserves_other_entries(tmp_path):
@@ -22,6 +27,21 @@ def test_env_keys_roundtrip_preserves_other_entries(tmp_path):
     assert "OTHER=value" in text
     assert "GEMINI_KEY_1=old" not in text
     assert load_gemini_keys(env_path) == {1: "key-one", 3: "key-three"}
+
+
+def test_naver_keys_roundtrip_preserves_other_entries(tmp_path):
+    env_path = tmp_path / ".env"
+    env_path.write_text("OTHER=value\nNAVER_CLIENT_ID=old\n", encoding="utf-8")
+
+    save_naver_keys("client-id", "client-secret", env_path)
+
+    text = env_path.read_text(encoding="utf-8")
+    assert "OTHER=value" in text
+    assert "NAVER_CLIENT_ID=old" not in text
+    assert load_naver_keys(env_path) == {
+        "NAVER_CLIENT_ID": "client-id",
+        "NAVER_CLIENT_SECRET": "client-secret",
+    }
 
 
 def test_export_articles_csv_excludes_body_internal(sample_bigkinds_xlsx, tmp_path):
@@ -53,4 +73,3 @@ def test_export_articles_csv_excludes_body_internal(sample_bigkinds_xlsx, tmp_pa
         header = next(csv.reader(f))
     assert "body_excerpt" in header
     assert "body_internal" not in header
-

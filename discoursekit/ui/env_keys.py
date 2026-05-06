@@ -54,3 +54,42 @@ def save_gemini_keys(keys: dict[int, str], env_path: Path | None = None) -> Path
     path.write_text("\n".join(filtered).rstrip() + "\n", encoding="utf-8")
     return path
 
+
+def load_naver_keys(env_path: Path | None = None) -> dict[str, str]:
+    """Load NAVER API credentials from the local .env file."""
+    path = env_path or ENV_PATH
+    keys: dict[str, str] = {}
+    if not path.exists():
+        return keys
+
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        name, _, value = stripped.partition("=")
+        if name in {"NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET"}:
+            keys[name] = value.strip().strip('"').strip("'")
+    return keys
+
+
+def save_naver_keys(
+    client_id: str,
+    client_secret: str,
+    env_path: Path | None = None,
+) -> Path:
+    """Save NAVER API credentials while preserving unrelated .env entries."""
+    path = env_path or ENV_PATH
+    existing_lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    filtered = [
+        line
+        for line in existing_lines
+        if not line.strip().startswith(("NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET"))
+    ]
+
+    if client_id.strip():
+        filtered.append(f"NAVER_CLIENT_ID={client_id.strip()}")
+    if client_secret.strip():
+        filtered.append(f"NAVER_CLIENT_SECRET={client_secret.strip()}")
+
+    path.write_text("\n".join(filtered).rstrip() + "\n", encoding="utf-8")
+    return path

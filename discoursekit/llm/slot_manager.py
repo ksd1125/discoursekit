@@ -24,6 +24,7 @@ class GeminiProjectSlot:
     tpm_quota: int = DEFAULT_TPM
     rpd_quota: int = DEFAULT_RPD
     enabled: bool = True
+    role: str = "general"
     _limiter: RateLimiterState = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -76,17 +77,27 @@ class GeminiSlotManager:
     def slots(self) -> list[GeminiProjectSlot]:
         return list(self._slots)
 
-    def get_next_available(self, estimated_tokens: int = 0) -> GeminiProjectSlot | None:
-        """Return next available slot using round-robin order."""
+    def get_next_available(self, estimated_tokens: int = 0, role: str = "general") -> GeminiProjectSlot | None:
+        """Return next available slot, preferring slots assigned to role."""
         if not self._slots:
             return None
 
-        n_slots = len(self._slots)
-        for offset in range(n_slots):
-            idx = (self._last_used_idx + 1 + offset) % n_slots
-            slot = self._slots[idx]
+        if role == "general":
+            n_slots = len(self._slots)
+            for offset in range(n_slots):
+                idx = (self._last_used_idx + 1 + offset) % n_slots
+                slot = self._slots[idx]
+                if slot.can_request(estimated_tokens):
+                    self._last_used_idx = idx
+                    return slot
+            return None
+
+        preferred = [slot for slot in self._slots if slot.role == role]
+        fallback = [slot for slot in self._slots if slot.role == "general" and slot not in preferred]
+        others = [slot for slot in self._slots if slot not in preferred and slot not in fallback]
+        for slot in preferred + fallback + others:
             if slot.can_request(estimated_tokens):
-                self._last_used_idx = idx
+                self._last_used_idx = self._slots.index(slot)
                 return slot
         return None
 
@@ -107,6 +118,7 @@ class GeminiSlotManager:
             {
                 "slot_name": slot.slot_name,
                 "masked_key": slot.masked_key,
+                "role": slot.role,
                 "enabled": slot.enabled,
                 "can_request": slot.can_request(),
                 "wait_seconds": slot.wait_seconds(),

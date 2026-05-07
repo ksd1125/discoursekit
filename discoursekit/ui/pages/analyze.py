@@ -13,6 +13,27 @@ from discoursekit.analyze.insight_cards import InsightCardPayload, build_insight
 from discoursekit.ui.components import empty_state, page_header
 
 
+# ── Responsive helpers ──
+
+def _responsive_chart_height(desktop: int, mobile: int = 280) -> int:
+    """Return chart height. Uses desktop value; Plotly responsive config handles mobile."""
+    return desktop
+
+
+def _plotly_responsive_config() -> dict:
+    """Plotly config dict enabling responsive behavior."""
+    return {"responsive": True, "displayModeBar": False}
+
+
+def _responsive_columns(n: int):
+    """Create columns that degrade gracefully on mobile via CSS.
+
+    On mobile, CSS flex-wrap handles stacking; we still create n columns
+    so desktop layout is correct.
+    """
+    return st.columns(n)
+
+
 def render() -> None:
     page_header(
         "분석 대시보드",
@@ -118,7 +139,7 @@ def _render_summary_header(project_id: str, stats, config: dict) -> None:
     except Exception:
         pass
 
-    cols = st.columns(5)
+    cols = _responsive_columns(5)
     cols[0].metric("분석 가능 기사", f"{stats.active_articles:,}건")
     cols[1].metric("핵심 키워드", top_keyword_label)
     cols[2].metric("피크 시기", peak_label)
@@ -153,10 +174,10 @@ _SOURCE_LABELS: dict[str, str] = {
 
 
 def _render_channel_summary(source_counts: dict[str, int]) -> None:
-    cols = st.columns(len(source_counts))
+    cols = _responsive_columns(min(len(source_counts), 4))
     for idx, (source, count) in enumerate(source_counts.items()):
         label = _SOURCE_LABELS.get(source, source)
-        cols[idx].metric(label, f"{count:,}건")
+        cols[idx % len(cols)].metric(label, f"{count:,}건")
 
 
 def _render_analysis_flow_hint(project_id: str) -> None:
@@ -192,7 +213,7 @@ def _render_analysis_flow_hint(project_id: str) -> None:
         pass
 
     st.markdown("#### 분석 흐름")
-    cols = st.columns(4)
+    cols = _responsive_columns(4)
     cols[0].metric("1. 자료 규모", f"{active_count:,}건")
     cols[1].metric("2. 핵심 키워드", top_keyword_label)
     cols[2].metric("3. 피크 시기", peak_label)
@@ -217,10 +238,12 @@ def _render_time_series(project_id: str) -> None:
         fig = px.area(df, x="period", y="count", markers=True)
         fig.update_layout(
             template="plotly_white",
-            height=390,
-            margin=dict(l=10, r=10, t=20, b=10),
+            height=_responsive_chart_height(390),
+            margin=dict(l=10, r=10, t=20, b=30),
             xaxis_title="Period",
             yaxis_title="Articles",
+            xaxis=dict(tickangle=-45, tickfont=dict(size=11)),
+            yaxis=dict(tickfont=dict(size=11)),
         )
         _add_time_series_annotations(fig, ts, config)
         _render_insight_card(replace(payload, chart_data=fig, evidence_items=_peak_evidence(project_id, ts, config)))
@@ -276,10 +299,10 @@ def _render_keywords(project_id: str) -> None:
         )
         fig.update_layout(
             template="plotly_white",
-            height=max(420, len(df) * 24),
-            yaxis=dict(autorange="reversed"),
+            height=_responsive_chart_height(max(420, len(df) * 24)),
+            yaxis=dict(autorange="reversed", tickfont=dict(size=11)),
             xaxis_title="Count",
-            yaxis_title="Keyword",
+            yaxis_title="",
             margin=dict(l=10, r=10, t=20, b=10),
         )
         fig.update_traces(text=df["count"], textposition="outside", cliponaxis=False)
@@ -310,10 +333,10 @@ def _render_keyword_forest(taxonomy) -> None:
         )
         fig.update_layout(
             template="plotly_white",
-            height=520,
-            margin=dict(l=10, r=10, t=20, b=10),
+            height=_responsive_chart_height(520, 360),
+            margin=dict(l=5, r=5, t=10, b=10),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, config=_plotly_responsive_config())
 
         totals_df = pd.DataFrame(taxonomy.category_totals)
         st.markdown("##### 대/중분류 요약")
@@ -375,10 +398,10 @@ def _render_keyword_trends(project_id: str) -> None:
         )
         fig.update_layout(
             template="plotly_white",
-            height=max(420, len(keywords) * 28),
-            yaxis=dict(autorange="reversed"),
+            height=_responsive_chart_height(max(420, len(keywords) * 28)),
+            yaxis=dict(autorange="reversed", tickfont=dict(size=11)),
             xaxis_title="Count",
-            yaxis_title="Keyword",
+            yaxis_title="",
             margin=dict(l=10, r=10, t=20, b=10),
         )
         _render_insight_card(
@@ -484,12 +507,13 @@ def _render_trajectory_focus_timeline(result) -> None:
     )
     fig.update_layout(
         template="plotly_white",
-        height=360,
+        height=_responsive_chart_height(360),
         xaxis_title="Period",
         yaxis_title="Focus keyword count",
-        margin=dict(l=10, r=10, t=20, b=10),
+        xaxis=dict(tickangle=-45, tickfont=dict(size=11)),
+        margin=dict(l=10, r=10, t=20, b=30),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config=_plotly_responsive_config())
     st.dataframe(df, use_container_width=True, hide_index=True)
 
 
@@ -515,8 +539,8 @@ def _render_trajectory_sankey(result) -> None:
         )
         fig.update_layout(
             template="plotly_white",
-            height=440,
-            margin=dict(l=10, r=10, t=20, b=10),
+            height=_responsive_chart_height(440, 320),
+            margin=dict(l=5, r=5, t=20, b=10),
         )
         st.markdown("#### 담론군 흐름")
         st.plotly_chart(fig, use_container_width=True)
@@ -673,13 +697,13 @@ def _render_network_chart(result) -> None:
         fig = go.Figure(data=[edge_trace, node_trace])
         fig.update_layout(
             template="plotly_white",
-            height=600,
+            height=_responsive_chart_height(600, 380),
             showlegend=False,
             xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
             yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            margin=dict(l=10, r=10, t=20, b=10),
+            margin=dict(l=5, r=5, t=10, b=10),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, config=_plotly_responsive_config())
     except Exception as exc:
         st.caption(f"의미망 시각화를 만들 수 없습니다: {exc}")
 
@@ -722,7 +746,7 @@ def _render_topic_structure(project_id: str, top_n: int) -> None:
 
     with st.expander("담론 구조 요약", expanded=True):
         st.info(structure.structural_summary)
-        cols = st.columns(3)
+        cols = _responsive_columns(3)
         with cols[0]:
             st.markdown("**브리지 키워드 후보**")
             for keyword in structure.bridge_keywords[:5]:
@@ -818,7 +842,7 @@ def _render_network_comparison(project_id: str, cutoff: str) -> None:
         comparison = st.session_state.get(f"net_comparison_{project_id}")
         if not comparison:
             return
-        cols = st.columns(3)
+        cols = _responsive_columns(3)
         cols[0].metric("새 연결", len(comparison.new_connections))
         cols[1].metric("사라진 연결", len(comparison.lost_connections))
         cols[2].metric("중심성 변화", len(comparison.centrality_shifts))
@@ -925,7 +949,7 @@ def _render_place_menu_panel(project_id: str) -> None:
 
     obs_summary = st.session_state[cache_key]
 
-    cols = st.columns(4)
+    cols = _responsive_columns(4)
     cols[0].metric("리뷰 수", f"{obs_summary.total_reviews:,}")
     cols[1].metric("메뉴 보유 리뷰", f"{obs_summary.reviews_with_menu:,}")
     cols[2].metric("관측 업소", f"{obs_summary.unique_places:,}")
@@ -1048,10 +1072,10 @@ def _render_publishers(project_id: str) -> None:
         )
         fig.update_layout(
             template="plotly_white",
-            height=max(420, len(df) * 26),
-            yaxis=dict(autorange="reversed"),
+            height=_responsive_chart_height(max(420, len(df) * 26)),
+            yaxis=dict(autorange="reversed", tickfont=dict(size=11)),
             xaxis_title="Articles",
-            yaxis_title="Source",
+            yaxis_title="",
             margin=dict(l=10, r=10, t=20, b=10),
             showlegend=False,
         )
@@ -1096,7 +1120,7 @@ def _render_before_after(project_id: str) -> None:
         )
         fig.update_layout(
             template="plotly_white",
-            height=360,
+            height=_responsive_chart_height(360),
             xaxis_title="Period",
             yaxis_title="Articles",
             margin=dict(l=10, r=10, t=20, b=10),
@@ -1174,10 +1198,10 @@ def _render_insight_card(payload: InsightCardPayload) -> None:
     )
 
     if payload.chart_data is not None:
-        st.plotly_chart(payload.chart_data, use_container_width=True)
+        st.plotly_chart(payload.chart_data, use_container_width=True, config=_plotly_responsive_config())
 
     if payload.callouts:
-        cols = st.columns(min(len(payload.callouts), 3))
+        cols = _responsive_columns(min(len(payload.callouts), 3))
         for idx, callout in enumerate(payload.callouts[:3]):
             with cols[idx]:
                 st.markdown(
@@ -1421,7 +1445,7 @@ def _article_rows(
 def _render_keyword_distribution_summary(result) -> None:
     stats = getattr(result, "frequency_stats", {}) or {}
     st.markdown("#### 키워드 빈도 분포")
-    cols = st.columns(4)
+    cols = _responsive_columns(4)
     cols[0].metric("추출 키워드", f"{result.unique_tokens:,}")
     cols[1].metric("핵심 구간", f"{len(getattr(result, 'core_keywords', []) or []):,}")
     cols[2].metric("평균 빈도", stats.get("mean", 0))

@@ -12,7 +12,7 @@ from typing import Optional
 # ─────────────────────────────────────────────
 
 def metric_card(label: str, value: str | int, delta: str = "", help_text: str = ""):
-    """Render a styled metric card."""
+    """Render a styled metric card, responsive via CSS clamp() in global styles."""
     delta_html = f'<span style="color:#2ec4b6;font-size:0.8rem;">{delta}</span>' if delta else ""
     # Format numeric values with comma separator; leave strings as-is
     if isinstance(value, (int, float)):

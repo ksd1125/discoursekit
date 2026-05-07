@@ -27,6 +27,7 @@ dependencies = [
     "pandas>=2.0",
     "plotly>=5.0",
     "statsmodels>=0.14",
+    "kiwipiepy>=0.17",
     "tomli>=2.0; python_version < '3.11'",
 ]
 

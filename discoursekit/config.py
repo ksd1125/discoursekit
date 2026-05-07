@@ -12,7 +12,21 @@ def _get_default_data_dir() -> Path:
     env_val = os.environ.get("DISCOURSEKIT_DATA_DIR", "")
     if env_val:
         return Path(env_val).expanduser().resolve()
-    return Path.home() / "discoursekit_data"
+    home_dir = Path.home() / "discoursekit_data"
+    if _can_create_project_dir(home_dir):
+        return home_dir
+    return Path.cwd() / "discoursekit_data"
+
+
+def _can_create_project_dir(data_dir: Path) -> bool:
+    """Return True when the project root accepts new project directories."""
+    probe = data_dir / "projects" / ".write_probe"
+    try:
+        probe.mkdir(parents=True, exist_ok=True)
+        probe.rmdir()
+        return True
+    except OSError:
+        return False
 
 
 DEFAULT_DATA_DIR: Path = _get_default_data_dir()

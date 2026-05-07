@@ -21,8 +21,14 @@ class IngestParams:
     query: str | None = None
     date_from: str | None = None
     date_to: str | None = None
+    display: int = 100
+    sort: str = "date"
+    max_results: int = 1000
+    client_id: str | None = None
+    client_secret: str | None = None
 
     def to_json_dict(self) -> dict:
+        """Return log-safe params. API credentials are intentionally excluded."""
         return {
             "project_id": self.project_id,
             "source": self.source,
@@ -30,6 +36,9 @@ class IngestParams:
             "query": self.query,
             "date_from": self.date_from,
             "date_to": self.date_to,
+            "display": self.display,
+            "sort": self.sort,
+            "max_results": self.max_results,
         }
 
 
